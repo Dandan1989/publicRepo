@@ -1,0 +1,239 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "virtualMachineName": {
+            "type": "String"
+        },
+        "VMSize": {
+            "defaultValue": "Standard_B2s",
+            "allowedValues": [
+                "Standard_B2s",
+                "Standard_D2s_v3",
+                "Standard_D4_v3",
+                "Standard_D4s_v3",
+                "Standard_A1_v2"
+            ],
+            "type": "String",
+            "metadata": {
+                "description": "Please sleect the Virtual Machine Size"
+            }
+        },
+        "subnetname": {
+            "defaultValue": "Servers-sn",
+            "allowedValues": [
+                "Servers-sn",
+                "SharedServices"
+            ],
+            "type": "String",
+            "metadata": {
+                "description": "Choose a Subnet"
+            }
+        },
+        "adminUsername": {
+            "defaultValue": "Serveradmin",
+            "type": "String"
+        },
+        "adminPassword": {
+            
+            "type": "SecureString"
+        },
+        "osDiskType": {
+            "defaultValue" : "Standard_LRS",
+            "type": "string"
+        },
+
+        //Below are the options for vnets, this is linked to the Production subcription, other URLs can be added to the allowed values list and then used in the parameters
+        "vnetId": {
+            "defaultValue":"/subscriptions/cb1550d3-ef98-4ffb-ad42-c029b28a9179/resourceGroups/BRC-UKS-Prod-Vnet01-rg/providers/Microsoft.Network/virtualNetworks/BRC-UKS-Prod-Vnet01",
+            "allowedValues":[
+                "/subscriptions/cb1550d3-ef98-4ffb-ad42-c029b28a9179/resourceGroups/BRC-UKS-Prod-Vnet01-rg/providers/Microsoft.Network/virtualNetworks/BRC-UKS-Prod-Vnet01",
+                "/subscriptions/cb1550d3-ef98-4ffb-ad42-c029b28a9179/resourceGroups/BRC-UKS-TestDev-Vnet01-rg/providers/Microsoft.Network/virtualNetworks/BRC-UKS-TestDev-Vnet01",
+                "/subscriptions/cb1550d3-ef98-4ffb-ad42-c029b28a9179/resourceGroups/BRC-UKS-Hub-Vnet01-rg/providers/Microsoft.Network/virtualNetworks/BRC-UKS-Hub-Vnet01"
+            ],
+            "type":"String",
+            "metadata":{
+                "description":"Select a network to attach the vm to"
+            }
+        },
+        "costCentreTag":{
+            "defaultvalue": "Unknown",
+            "type":"String"
+        },
+
+        "windowsSkuVersion":{
+            "defaultvalue": "2019-Datacenter",
+            "allowedValues":[
+                    "2012-R2-Datacenter",
+                    "2016-Datacenter",
+                    "2019-Datacenter"
+            ],
+            "type":"String"
+        },
+        "domainAdminUserName": {
+            "defaultValue": "redcross.org.uk\\azureVmCreator",
+            "type": "string",
+            "metadata": {
+                "description": "Administrator Username for the domain join account"
+            }
+        },
+        "domainAdminPassword": {
+            "type": "securestring",
+            "metadata": {
+                "description": "Administrator password for the domain join account"
+            }
+        },
+        "domainFQDN": {
+            "type": "string",
+            "defaultValue": "redcross.org.uk",
+            "metadata": {
+                "description": "Domain FQDN where the virtual machine will be joined"
+            }
+        },
+        "ouPath": {
+            "type": "string",
+            "defaultValue": "",
+            "metadata": {
+                "description": "Specifies an organizational unit (OU) for the domain account. Enter the full distinguished name of the OU in quotation marks. Example: \"OU=testOU; DC=domain; DC=Domain; DC=com\""
+            }
+        }
+
+
+     
+    },
+    "variables": {
+        "subnetRef":"[concat(parameters('vnetId'), '/subnets/', parameters('subnetName'))]",
+         "domainJoinOptions": 3   
+        
+    },
+    "resources": [
+         
+        {
+            "type": "Microsoft.Network/networkInterfaces",
+            "apiVersion": "2019-07-01",
+            "name": "[concat(parameters('virtualMachineName'), '-nic01')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "ipConfigurations": [
+                    {
+                        "name": "ipconfig1",
+                        "properties": {
+                            "subnet": {
+                                "id": "[variables('subnetRef')]"
+                            },
+                            "privateIPAllocationMethod": "Dynamic",
+                            "privateIPAddressVersion": "IPv4"
+                        }
+                    }
+                ]
+            }
+        },
+
+        {
+            "type": "Microsoft.Compute/virtualMachines",
+            "apiVersion": "2019-07-01",
+            "name": "[parameters('virtualMachineName')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[concat(parameters('virtualMachineName'), '-nic01')]"
+            ],
+
+    //tags are pulled down from the resource group apart from the cost center as this has a space in the name
+            "tags": {
+                "Environment": "[resourceGroup().tags.environment]",
+                "Owner": "[resourceGroup().tags.owner]",
+                "Application": "[resourceGroup().tags.application]",
+                "Criticality":"[resourceGroup().tags.criticality]",
+                "Cost Centre":"[parameters('costCentreTag')]"
+            },
+            "properties": {
+                "hardwareProfile": {
+                    "vmSize": "[parameters('VMSize')]"
+                },
+                "storageProfile": {
+                    "osDisk": {
+                        "name": "[concat(parameters('virtualMachineName'),'-diskos')]",
+                        "createOption": "FromImage",
+                        "managedDisk": {
+                            "storageAccountType": "[parameters('osDiskType')]"
+                            
+                        }
+                    },
+                    "imageReference": {
+                        "publisher": "MicrosoftWindowsServer",
+                        "offer": "WindowsServer",
+                        "sku": "[parameters('windowsSkuVersion')]",
+                        "version": "latest"
+                    }
+                },
+
+                "networkProfile": {
+                    "networkInterfaces": [
+                        {
+                            "id": "[resourceId('Microsoft.Network/networkInterfaces',concat(parameters('virtualMachineName'), '-nic01'))]"
+                        }
+                    ]
+                },
+                "osProfile": {
+                    "computerName": "[parameters('virtualMachineName')]",
+                    "adminUsername": "[parameters('adminUsername')]",
+                    "adminPassword": "[parameters('adminPassword')]",
+                    "windowsConfiguration": {
+                        "enableAutomaticUpdates": true,
+                        "provisionVmAgent": true
+                    }
+                },
+                "diagnosticsProfile": {
+                    "bootDiagnostics": {
+                        "enabled": true,
+                        "storageUri": "[concat('https://', 'brcadrgdiag','.blob.core.windows.net/')]"
+                    }
+                }
+                
+                
+            }
+        },
+    // the below section joins the vm to the domain - this is based on the credentials provided in the parameters section
+        {
+            "apiVersion": "2015-06-15",
+            "type": "Microsoft.Compute/virtualMachines/extensions",
+            "name": "[concat(parameters('virtualMachineName'), '/joindomain')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[concat('Microsoft.Compute/virtualMachines/', parameters('virtualMachineName'))]"
+            ],
+            "properties": {
+                "publisher": "Microsoft.Compute",
+                "type": "JsonADDomainExtension",
+                "typeHandlerVersion": "1.3",
+                "autoUpgradeMinorVersion": true,
+                "settings": {
+                    "Name": "[parameters('domainFQDN')]",
+                    "OUPath": "[parameters('ouPath')]",
+                    "User": "[parameters('domainAdminUserName')]",
+                    "Restart": "true",
+                    "Options": "[variables('domainJoinOptions')]"
+                },
+                "protectedSettings": {
+                    "Password": "[parameters('domainAdminPassword')]"
+                }
+            }
+        }
+
+
+
+    
+
+
+    ],
+    
+        "outputs": {
+        "adminUsername": {
+            "type": "String",
+            "value": "[parameters('adminUsername')]"
+                    }
+         }
+    
+}
+
+
